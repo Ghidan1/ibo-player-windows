@@ -338,7 +338,7 @@ namespace IBOPlayer
                     {
                         var item = new ToolStripMenuItem(t.Name ?? ("Track " + t.Id));
                         int id = t.Id;
-                        item.Click += (_, _) => { try { mp.AudioTrack = id; } catch { } };
+                        item.Click += (_, _) => { try { mp.SetAudioTrack(id); } catch { } };
                         menu.Items.Add(item);
                     }
                 }
@@ -353,7 +353,7 @@ namespace IBOPlayer
             if (mp == null) return;
             var menu = new ContextMenuStrip();
             var none = new ToolStripMenuItem("No subtitles");
-            none.Click += (_, _) => { try { mp.Spu = -1; } catch { } };
+            none.Click += (_, _) => { try { mp.SetSpu(-1); } catch { } };
             menu.Items.Add(none);
             try
             {
@@ -364,7 +364,7 @@ namespace IBOPlayer
                     {
                         var item = new ToolStripMenuItem(t.Name ?? ("Subtitle " + t.Id));
                         int id = t.Id;
-                        item.Click += (_, _) => { try { mp.Spu = id; } catch { } };
+                        item.Click += (_, _) => { try { mp.SetSpu(id); } catch { } };
                         menu.Items.Add(item);
                     }
                 }
