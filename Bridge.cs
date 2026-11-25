@@ -48,7 +48,7 @@ namespace ZaghlolPlayer
         {
             return Task.FromResult(J(new
             {
-                version = "2.0.0",
+                version = "2.0.1",
                 settings = Store.Settings,
                 logins = Store.Data.Logins,
                 favorites = Store.Data.Favorites,
@@ -157,9 +157,14 @@ namespace ZaghlolPlayer
             try
             {
                 if (string.IsNullOrWhiteSpace(url)) return Err("من فضلك أدخل رابط M3U");
-                var text = await PlaylistService.DownloadTextAsync(url.Trim());
-                if (text == null) return Err("تعذر تحميل رابط M3U — تأكد من الرابط والإنترنت");
-                var login = new LoginProfile { Name = string.IsNullOrWhiteSpace(name) ? "M3U Playlist" : name, Kind = PlaylistKind.M3uUrl, M3uUrl = url.Trim() };
+                url = url.Trim();
+                // Panels generate big playlists on the fly — give it up to 60s.
+                var r = await PlaylistService.FetchTextAsync(url, 60);
+                if (!r.Ok) return Err(r.ErrorAr);
+                var text = r.Text ?? "";
+                if (!text.Contains("#EXTM3U") && !text.Contains("#EXTINF"))
+                    return Err("السيرفر ردّ برد ليس قائمة M3U — تأكد من صحة الرابط وبيانات الاشتراك");
+                var login = new LoginProfile { Name = string.IsNullOrWhiteSpace(name) ? "M3U Playlist" : name, Kind = PlaylistKind.M3uUrl, M3uUrl = url };
                 var data = PlaylistService.ParseM3u(text, login);
                 if (data.Channels.Count == 0) return Err("القائمة فارغة — لا توجد قنوات في هذا الرابط");
                 Session.Data = data; Session.Login = login; Session.Xtream = null;
@@ -167,7 +172,7 @@ namespace ZaghlolPlayer
                 RememberLogin(login);
                 return Ok(new { channels = data.Channels.Count });
             }
-            catch (Exception ex) { return Err(ex.Message); }
+            catch (Exception ex) { return Err(PlaylistService.CleanError(ex.Message)); }
         }
 
         public async Task<string> LoadM3uFile(string path)
@@ -196,6 +201,11 @@ namespace ZaghlolPlayer
 
         public async Task<string> LoginXtream(string server, string user, string pass, string name)
         {
+            // Hard global timeout: the whole login (auth + all lists) must finish in 25s.
+            // The old code made 7 sequential requests, each up to 30s — a slow panel
+            // could leave the button stuck on "loading" for minutes.
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(25));
+            var ct = cts.Token;
             try
             {
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(user))
@@ -203,18 +213,29 @@ namespace ZaghlolPlayer
                 server = server.Trim().TrimEnd('/');
                 if (!server.StartsWith("http", StringComparison.OrdinalIgnoreCase)) server = "http://" + server;
                 var client = new PlaylistService.XtreamClient(server, user.Trim(), pass ?? "");
-                if (!await client.AuthenticateAsync())
-                    return Err("فشل تسجيل الدخول — تأكد من السيرفر واسم المستخدم وكلمة المرور");
+                var (authed, authErr) = await client.AuthenticateDetailedAsync(ct);
+                if (!authed) return Err(authErr);
                 var data = new PlaylistData
                 {
                     Login = new LoginProfile { Name = string.IsNullOrWhiteSpace(name) ? "Xtream" : name, Kind = PlaylistKind.Xtream, Server = server, Username = user.Trim(), Password = pass ?? "" }
                 };
-                data.LiveCategories = await client.GetLiveCategoriesAsync();
-                data.Channels = await client.GetLiveStreamsAsync();
-                data.VodCategories = await client.GetVodCategoriesAsync();
-                data.Movies = await client.GetVodStreamsAsync();
-                data.SeriesCategories = await client.GetSeriesCategoriesAsync();
-                data.Series = await client.GetSeriesAsync();
+                // The 6 catalogue calls are independent — run them in parallel instead of
+                // one after another, so a slow panel costs the slowest call, not the sum.
+                var tLiveCats = client.GetLiveCategoriesAsync(ct);
+                var tLive = client.GetLiveStreamsAsync(ct);
+                var tVodCats = client.GetVodCategoriesAsync(ct);
+                var tVod = client.GetVodStreamsAsync(ct);
+                var tSerCats = client.GetSeriesCategoriesAsync(ct);
+                var tSer = client.GetSeriesAsync(ct);
+                await Task.WhenAll(tLiveCats, tLive, tVodCats, tVod, tSerCats, tSer);
+                if (ct.IsCancellationRequested)
+                    return Err("انتهت المهلة (25 ثانية) — السيرفر بطيء أو لا يرد. جرّب «اختبار الاتصال» أولاً.");
+                data.LiveCategories = await tLiveCats;
+                data.Channels = await tLive;
+                data.VodCategories = await tVodCats;
+                data.Movies = await tVod;
+                data.SeriesCategories = await tSerCats;
+                data.Series = await tSer;
                 var catNames = data.LiveCategories.ToDictionary(c => c.Id, c => c.Name);
                 foreach (var ch in data.Channels)
                     if (catNames.TryGetValue(ch.CategoryId, out var cn)) ch.CategoryName = cn;
@@ -231,7 +252,62 @@ namespace ZaghlolPlayer
                 RememberLogin(data.Login);
                 return Ok(new { channels = data.Channels.Count, movies = data.Movies.Count, series = data.Series.Count });
             }
-            catch (Exception ex) { return Err(ex.Message); }
+            catch (OperationCanceledException)
+            {
+                return Err("انتهت المهلة (25 ثانية) — السيرفر بطيء أو لا يرد. جرّب «اختبار الاتصال» أولاً.");
+            }
+            catch (Exception ex) { return Err(PlaylistService.CleanError(ex.Message)); }
+        }
+
+        /// <summary>
+        /// "اختبار الاتصال" from the login screen: reports plainly what the server
+        /// answered (status / timing / auth result) so the next failure is diagnosable.
+        /// Never includes the password or the full URL (query string) in the report.
+        /// </summary>
+        public async Task<string> TestConnection(string kind, string a, string b, string c)
+        {
+            try
+            {
+                var lines = new List<string>();
+                if (kind == "m3u")
+                {
+                    var url = (a ?? "").Trim();
+                    if (string.IsNullOrWhiteSpace(url)) return Err("أدخل رابط M3U أولاً");
+                    var host = Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : url;
+                    lines.Add("الخادم: " + host);
+                    var r = await PlaylistService.FetchStartAsync(url, 15, 2048);
+                    if (!r.Ok)
+                    {
+                        lines.Add("النتيجة: فشل — " + r.ErrorAr);
+                        return Ok(new { ok = false, report = string.Join("\n", lines) });
+                    }
+                    lines.Add($"الرد: HTTP {r.StatusCode} خلال {r.ElapsedMs} م.ث" + (r.ContentLength.HasValue ? $" — الحجم {r.ContentLength.Value:N0} بايت" : ""));
+                    var head = (r.Text ?? "").TrimStart();
+                    var looksPlaylist = head.Contains("#EXTM3U") || head.Contains("#EXTINF");
+                    lines.Add(looksPlaylist
+                        ? "النتيجة: الرابط يرجّع قائمة M3U صالحة ✔ — اضغط «تحميل القائمة»"
+                        : "النتيجة: الرد ليس قائمة M3U — تأكد من بيانات الاشتراك والرابط");
+                    return Ok(new { ok = looksPlaylist, report = string.Join("\n", lines) });
+                }
+                if (kind == "xtream")
+                {
+                    var server = (a ?? "").Trim().TrimEnd('/');
+                    if (string.IsNullOrWhiteSpace(server)) return Err("أدخل رابط السيرفر أولاً");
+                    if (!server.StartsWith("http", StringComparison.OrdinalIgnoreCase)) server = "http://" + server;
+                    if (string.IsNullOrWhiteSpace(b)) return Err("أدخل اسم المستخدم وكلمة المرور أولاً");
+                    lines.Add("الخادم: " + server);
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var client = new PlaylistService.XtreamClient(server, b.Trim(), c ?? "");
+                    var (authed, authErr) = await client.AuthenticateDetailedAsync(System.Threading.CancellationToken.None);
+                    lines.Add($"زمن الرد: {sw.ElapsedMilliseconds} م.ث");
+                    lines.Add(authed
+                        ? "النتيجة: تم تسجيل الدخول بنجاح ✔ — اضغط «تسجيل الدخول»"
+                        : "النتيجة: فشل — " + authErr);
+                    return Ok(new { ok = authed, report = string.Join("\n", lines) });
+                }
+                return Err("نوع اختبار غير معروف");
+            }
+            catch (Exception ex) { return Err(PlaylistService.CleanError(ex.Message)); }
         }
 
         public Task<string> LoginDemo()

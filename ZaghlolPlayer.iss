@@ -1,9 +1,9 @@
-; Zaghlol Player v2.0 — Inno Setup installer script.
+; Zaghlol Player v2.0.1 — Inno Setup installer script.
 ; Built by GitHub Actions (choco install innosetup, then ISCC.exe).
 ; Per-user install, no admin needed: the player only reads the
 ; user's own playlists and plays video.
 
-#define AppVersion "2.0"
+#define AppVersion "2.0.1"
 #define AppExe "publish\ZaghlolPlayer.exe"
 
 [Setup]

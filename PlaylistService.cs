@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 
@@ -12,14 +15,131 @@ namespace ZaghlolPlayer
 {
     public static class PlaylistService
     {
-        private static readonly HttpClient Http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(30)
-        };
+        private static readonly HttpClient Http;
 
         static PlaylistService()
         {
-            Http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "ZaghlolPlayer/2.0");
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+                AllowAutoRedirect = true,
+                MaxAutomaticRedirections = 10
+            };
+            Http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
+            // Browser-like User-Agent: some IPTV panels / WAFs drop requests from unknown clients.
+            Http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+            Http.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "*/*");
+        }
+
+        /// <summary>Removes any credentials that might leak into an exception message (never show passwords).</summary>
+        public static string CleanError(string? msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return "خطأ غير معروف";
+            var s = Regex.Replace(msg, @"(username|password)=[^&\s""']*", "$1=***", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"://[^\s""']*?@(?!$)", "://***@", RegexOptions.IgnoreCase);
+            return s;
+        }
+
+        public sealed class FetchResult
+        {
+            public bool Ok;
+            public string? Text;
+            public string ErrorAr = "";
+            public int? StatusCode;
+            public long ElapsedMs;
+            public long? ContentLength;
+        }
+
+        /// <summary>
+        /// GET with an explicit hard timeout. Never returns null: on failure it returns a
+        /// detailed Arabic error (HTTP status / timeout / empty reply) so the UI can show
+        /// the REAL reason instead of a generic message.
+        /// </summary>
+        public static async Task<FetchResult> FetchTextAsync(string url, int timeoutSeconds, CancellationToken externalCt = default)
+        {
+            var sw = Stopwatch.StartNew();
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                return new FetchResult { ErrorAr = "الرابط غير صحيح — لازم يبدأ بـ http:// أو https://" };
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, timeoutSeconds)));
+            try
+            {
+                using var resp = await Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                if (!resp.IsSuccessStatusCode)
+                    return new FetchResult
+                    {
+                        StatusCode = (int)resp.StatusCode, ElapsedMs = sw.ElapsedMilliseconds,
+                        ErrorAr = $"السيرفر رد بالخطأ {(int)resp.StatusCode} — تأكد من صحة الرابط وبيانات الاشتراك"
+                    };
+                var text = await resp.Content.ReadAsStringAsync(cts.Token);
+                return new FetchResult { Ok = true, Text = text, StatusCode = (int)resp.StatusCode, ElapsedMs = sw.ElapsedMilliseconds };
+            }
+            catch (OperationCanceledException)
+            {
+                return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = $"انتهت المهلة ({timeoutSeconds} ثانية) — السيرفر بطيء أو لا يرد" };
+            }
+            catch (HttpRequestException ex)
+            {
+                var msg = ex.Message ?? "";
+                if (msg.Contains("empty", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("closed", StringComparison.OrdinalIgnoreCase) ||
+                    ex.InnerException is IOException)
+                    return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = "السيرفر أغلق الاتصال بدون رد — تأكد من صحة الرابط وبيانات الاشتراك" };
+                return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = "تعذر الاتصال بالسيرفر: " + CleanError(msg) };
+            }
+            catch (Exception ex)
+            {
+                return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = "خطأ أثناء التحميل: " + CleanError(ex.Message) };
+            }
+        }
+
+        /// <summary>GET that reads only the first bytes — used by the connection test (no full download).</summary>
+        public static async Task<FetchResult> FetchStartAsync(string url, int timeoutSeconds, int maxBytes)
+        {
+            var sw = Stopwatch.StartNew();
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                return new FetchResult { ErrorAr = "الرابط غير صحيح — لازم يبدأ بـ http:// أو https://" };
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(5, timeoutSeconds)));
+            try
+            {
+                using var resp = await Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                if (!resp.IsSuccessStatusCode)
+                    return new FetchResult
+                    {
+                        StatusCode = (int)resp.StatusCode, ElapsedMs = sw.ElapsedMilliseconds,
+                        ErrorAr = $"السيرفر رد بالخطأ {(int)resp.StatusCode} — تأكد من صحة الرابط وبيانات الاشتراك"
+                    };
+                using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+                var buf = new byte[maxBytes];
+                int read = 0, n;
+                while (read < maxBytes && (n = await stream.ReadAsync(buf, read, maxBytes - read, cts.Token)) > 0) read += n;
+                var text = System.Text.Encoding.UTF8.GetString(buf, 0, read);
+                return new FetchResult
+                {
+                    Ok = true, Text = text, StatusCode = (int)resp.StatusCode,
+                    ElapsedMs = sw.ElapsedMilliseconds, ContentLength = resp.Content.Headers.ContentLength
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = $"انتهت المهلة ({timeoutSeconds} ثانية) — السيرفر بطيء أو لا يرد" };
+            }
+            catch (HttpRequestException ex)
+            {
+                var msg = ex.Message ?? "";
+                if (msg.Contains("empty", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("closed", StringComparison.OrdinalIgnoreCase) ||
+                    ex.InnerException is IOException)
+                    return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = "السيرفر أغلق الاتصال بدون رد — تأكد من صحة الرابط وبيانات الاشتراك" };
+                return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = "تعذر الاتصال بالسيرفر: " + CleanError(msg) };
+            }
+            catch (Exception ex)
+            {
+                return new FetchResult { ElapsedMs = sw.ElapsedMilliseconds, ErrorAr = "خطأ أثناء التحميل: " + CleanError(ex.Message) };
+            }
         }
 
         // ---------------- M3U ----------------
@@ -145,29 +265,48 @@ namespace ZaghlolPlayer
                 return url;
             }
 
-            private async Task<JsonDocument?> GetJsonAsync(string url)
+            private async Task<JsonDocument?> GetJsonAsync(string url, CancellationToken ct)
             {
                 try
                 {
-                    var json = await Http.GetStringAsync(url);
-                    if (string.IsNullOrWhiteSpace(json)) return null;
-                    return JsonDocument.Parse(json);
+                    var r = await FetchTextAsync(url, 15, ct);
+                    if (!r.Ok || string.IsNullOrWhiteSpace(r.Text)) return null;
+                    return JsonDocument.Parse(r.Text);
                 }
                 catch { return null; }
             }
 
-            public async Task<bool> AuthenticateAsync()
+            public async Task<bool> AuthenticateAsync(CancellationToken ct = default)
             {
-                using var doc = await GetJsonAsync(ApiUrl(""));
-                if (doc == null) return false;
-                var root = doc.RootElement;
-                if (root.TryGetProperty("user_info", out var ui) && ui.ValueKind == JsonValueKind.Object)
+                var (ok, _) = await AuthenticateDetailedAsync(ct);
+                return ok;
+            }
+
+            /// <summary>Auth with a detailed Arabic reason on failure (wrong creds / timeout / HTTP error).</summary>
+            public async Task<(bool Ok, string ErrorAr)> AuthenticateDetailedAsync(CancellationToken ct = default)
+            {
+                var r = await FetchTextAsync(ApiUrl(""), 15, ct);
+                if (!r.Ok) return (false, r.ErrorAr);
+                try
                 {
-                    if (ui.TryGetProperty("status", out var st))
-                        return st.GetString() == "Active";
-                    return true;
+                    using var doc = JsonDocument.Parse(r.Text ?? "");
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("user_info", out var ui) && ui.ValueKind == JsonValueKind.Object)
+                    {
+                        if (ui.TryGetProperty("auth", out var auth) && auth.ValueKind == JsonValueKind.Number && auth.GetInt32() == 0)
+                            return (false, "بيانات الدخول غير صحيحة أو الاشتراك منتهي");
+                        if (ui.TryGetProperty("status", out var st))
+                            return st.GetString() == "Active"
+                                ? (true, "")
+                                : (false, "الحساب غير نشط (الحالة: " + (st.GetString() ?? "?") + ") — راجع مزوّد الخدمة");
+                        return (true, "");
+                    }
+                    return (false, "السيرفر ردّ برد غير متوقع — تأكد من رابط السيرفر");
                 }
-                return false;
+                catch
+                {
+                    return (false, "السيرفر ردّ برد غير صالح (ليس JSON) — تأكد من رابط السيرفر");
+                }
             }
 
             private static string Str(JsonElement el, string name)
@@ -179,10 +318,10 @@ namespace ZaghlolPlayer
                 return "";
             }
 
-            private async Task<List<Category>> GetCategoriesAsync(string action)
+            private async Task<List<Category>> GetCategoriesAsync(string action, CancellationToken ct)
             {
                 var list = new List<Category>();
-                using var doc = await GetJsonAsync(ApiUrl(action));
+                using var doc = await GetJsonAsync(ApiUrl(action), ct);
                 if (doc == null || doc.RootElement.ValueKind != JsonValueKind.Array) return list;
                 foreach (var el in doc.RootElement.EnumerateArray())
                 {
@@ -195,14 +334,14 @@ namespace ZaghlolPlayer
                 return list;
             }
 
-            public Task<List<Category>> GetLiveCategoriesAsync() => GetCategoriesAsync("get_live_categories");
-            public Task<List<Category>> GetVodCategoriesAsync() => GetCategoriesAsync("get_vod_categories");
-            public Task<List<Category>> GetSeriesCategoriesAsync() => GetCategoriesAsync("get_series_categories");
+            public Task<List<Category>> GetLiveCategoriesAsync(CancellationToken ct = default) => GetCategoriesAsync("get_live_categories", ct);
+            public Task<List<Category>> GetVodCategoriesAsync(CancellationToken ct = default) => GetCategoriesAsync("get_vod_categories", ct);
+            public Task<List<Category>> GetSeriesCategoriesAsync(CancellationToken ct = default) => GetCategoriesAsync("get_series_categories", ct);
 
-            public async Task<List<Channel>> GetLiveStreamsAsync()
+            public async Task<List<Channel>> GetLiveStreamsAsync(CancellationToken ct = default)
             {
                 var list = new List<Channel>();
-                using var doc = await GetJsonAsync(ApiUrl("get_live_streams"));
+                using var doc = await GetJsonAsync(ApiUrl("get_live_streams"), ct);
                 if (doc == null || doc.RootElement.ValueKind != JsonValueKind.Array) return list;
                 foreach (var el in doc.RootElement.EnumerateArray())
                 {
@@ -221,10 +360,10 @@ namespace ZaghlolPlayer
                 return list;
             }
 
-            public async Task<List<VodItem>> GetVodStreamsAsync()
+            public async Task<List<VodItem>> GetVodStreamsAsync(CancellationToken ct = default)
             {
                 var list = new List<VodItem>();
-                using var doc = await GetJsonAsync(ApiUrl("get_vod_streams"));
+                using var doc = await GetJsonAsync(ApiUrl("get_vod_streams"), ct);
                 if (doc == null || doc.RootElement.ValueKind != JsonValueKind.Array) return list;
                 foreach (var el in doc.RootElement.EnumerateArray())
                 {
@@ -250,10 +389,10 @@ namespace ZaghlolPlayer
                 return list;
             }
 
-            public async Task<List<SerieItem>> GetSeriesAsync()
+            public async Task<List<SerieItem>> GetSeriesAsync(CancellationToken ct = default)
             {
                 var list = new List<SerieItem>();
-                using var doc = await GetJsonAsync(ApiUrl("get_series"));
+                using var doc = await GetJsonAsync(ApiUrl("get_series"), ct);
                 if (doc == null || doc.RootElement.ValueKind != JsonValueKind.Array) return list;
                 foreach (var el in doc.RootElement.EnumerateArray())
                 {
@@ -272,9 +411,9 @@ namespace ZaghlolPlayer
                 return list;
             }
 
-            public async Task GetSeriesInfoAsync(SerieItem serie)
+            public async Task GetSeriesInfoAsync(SerieItem serie, CancellationToken ct = default)
             {
-                using var doc = await GetJsonAsync(ApiUrl("get_series_info", "series_id=" + serie.Id));
+                using var doc = await GetJsonAsync(ApiUrl("get_series_info", "series_id=" + serie.Id), ct);
                 if (doc == null) return;
                 var root = doc.RootElement;
                 if (root.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Object)
@@ -322,10 +461,10 @@ namespace ZaghlolPlayer
             }
 
             // Short EPG (now/next) for one stream
-            public async Task<List<EpgProgram>> GetShortEpgAsync(string streamId, int limit = 10)
+            public async Task<List<EpgProgram>> GetShortEpgAsync(string streamId, int limit = 10, CancellationToken ct = default)
             {
                 var list = new List<EpgProgram>();
-                using var doc = await GetJsonAsync(ApiUrl("get_short_epg", "stream_id=" + streamId + "&limit=" + limit));
+                using var doc = await GetJsonAsync(ApiUrl("get_short_epg", "stream_id=" + streamId + "&limit=" + limit), ct);
                 if (doc == null) return list;
                 var root = doc.RootElement;
                 if (!root.TryGetProperty("epg_listings", out var arr) || arr.ValueKind != JsonValueKind.Array) return list;
@@ -335,10 +474,10 @@ namespace ZaghlolPlayer
             }
 
             // Full EPG table for one stream (used by the 7-day guide)
-            public async Task<List<EpgProgram>> GetFullEpgAsync(string streamId)
+            public async Task<List<EpgProgram>> GetFullEpgAsync(string streamId, CancellationToken ct = default)
             {
                 var list = new List<EpgProgram>();
-                using var doc = await GetJsonAsync(ApiUrl("get_simple_data_table", "stream_id=" + streamId));
+                using var doc = await GetJsonAsync(ApiUrl("get_simple_data_table", "stream_id=" + streamId), ct);
                 if (doc == null) return list;
                 var root = doc.RootElement;
                 if (!root.TryGetProperty("epg_listings", out var arr) || arr.ValueKind != JsonValueKind.Array) return list;
@@ -367,12 +506,9 @@ namespace ZaghlolPlayer
         public static async Task<Dictionary<string, List<EpgProgram>>> FetchXmlTvAsync(string url)
         {
             var result = new Dictionary<string, List<EpgProgram>>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                var xml = await Http.GetStringAsync(url);
-                ParseXmlTv(xml, result);
-            }
-            catch { }
+            var r = await FetchTextAsync(url, 20);
+            if (r.Ok && !string.IsNullOrEmpty(r.Text))
+                ParseXmlTv(r.Text, result);
             return result;
         }
 
@@ -433,8 +569,8 @@ namespace ZaghlolPlayer
 
         public static async Task<string?> DownloadTextAsync(string url)
         {
-            try { return await Http.GetStringAsync(url); }
-            catch { return null; }
+            var r = await FetchTextAsync(url, 30);
+            return r.Ok ? r.Text : null;
         }
     }
 }

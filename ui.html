@@ -237,6 +237,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
       <label>اسم العرض (اختياري)</label>
       <input type="text" id="inM3uName" placeholder="مثال: اشتراكي">
       <button class="btn" onclick="doLogin('m3u')">تحميل القائمة ▶</button>
+      <button class="btn ghost" style="width:100%;margin-top:8px" onclick="testConn('m3u')">🔌 اختبار الاتصال</button>
     </div>
 
     <div id="formXtream" class="loginForm hidden">
@@ -247,6 +248,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
       <label>كلمة المرور</label>
       <input type="password" id="inXPass" placeholder="password" dir="ltr" style="text-align:left">
       <button class="btn" onclick="doLogin('xtream')">تسجيل الدخول ▶</button>
+      <button class="btn ghost" style="width:100%;margin-top:8px" onclick="testConn('xtream')">🔌 اختبار الاتصال</button>
     </div>
 
     <div id="formMac" class="loginForm hidden">
@@ -255,6 +257,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
     </div>
 
     <div id="loginErr" class="loginErr"></div>
+    <div id="connTest" class="hidden" style="white-space:pre-line;background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:12px 14px;font-size:13px;line-height:1.9;text-align:start;margin-top:10px"></div>
     <div id="savedWrap" class="savedList hidden">
       <div class="secTitle">حسابات محفوظة</div>
       <div id="savedList"></div>
@@ -504,8 +507,11 @@ function toast(msg, ms){
 }
 async function call(method, ...args){
   if(!api) throw new Error('bridge missing');
-  const raw = await api[method](...args);
-  return JSON.parse(raw);
+  // Safety net: even if the native side never answers, the UI must never stay
+  // stuck on "loading" forever. 65s covers the slowest legit call (60s M3U download).
+  const p = api[method](...args).then(raw => JSON.parse(raw));
+  const t = new Promise((_, rej) => setTimeout(() => rej(new Error('انتهت المهلة (65 ثانية) — لم يرد التطبيق، جرّب مرة أخرى')), 65000));
+  return Promise.race([p, t]);
 }
 function hueOf(name){
   let h = 0; for(const c of String(name)) h = (h*31 + c.charCodeAt(0)) % 360;
@@ -573,6 +579,7 @@ async function pickTheme(name){
 function showLoginForm(kind){
   ['formM3u','formXtream','formMac'].forEach(id => $(id).classList.add('hidden'));
   $('loginErr').textContent = '';
+  $('connTest').classList.add('hidden'); $('connTest').textContent = '';
   if(kind === 'm3u') $('formM3u').classList.remove('hidden');
   if(kind === 'xtream') $('formXtream').classList.remove('hidden');
   if(kind === 'mac') $('formMac').classList.remove('hidden');
@@ -611,14 +618,20 @@ async function pickM3uFile(){
 }
 async function doLogin(kind){
   $('loginErr').textContent = '';
-  const btn = event && event.target ? event.target : null;
+  // Only real <button> elements get the busy state (demo/mac use div cards).
+  const btn = (event && event.target && event.target.closest) ? event.target.closest('button') : null;
   const origText = btn ? btn.textContent : '';
-  if(btn) btn.textContent = 'جارٍ التحميل...';
+  if(btn){ btn.disabled = true; btn.style.opacity = '.65'; }
+  // Live seconds ticker so the user can see the app is working, not frozen.
+  let secs = 0, timer = null;
+  const setBusy = () => { if(btn) btn.textContent = 'جارٍ التحميل... (' + secs + ' ث)'; };
+  setBusy();
+  timer = setInterval(() => { secs++; setBusy(); }, 1000);
   try{
     let r;
     if(kind === 'm3u'){
       const url = $('inM3uUrl').value.trim();
-      if(!url){ $('loginErr').textContent = 'أدخل رابط M3U أولاً'; if(btn) btn.textContent = 'تحميل القائمة ▶'; return; }
+      if(!url){ $('loginErr').textContent = 'أدخل رابط M3U أولاً'; return; }
       r = await call('LoginM3u', url, $('inM3uName').value.trim());
     } else if(kind === 'xtream'){
       r = await call('LoginXtream', $('inXServer').value.trim(), $('inXUser').value.trim(), $('inXPass').value, '');
@@ -630,7 +643,33 @@ async function doLogin(kind){
     if(r && r.ok){ await enterApp(); }
     else { $('loginErr').textContent = (r && r.error) || 'فشل تسجيل الدخول'; }
   }catch(e){ $('loginErr').textContent = 'خطأ: ' + e.message; }
-  if(btn) btn.textContent = origText;
+  finally{
+    clearInterval(timer);
+    if(btn){ btn.textContent = origText; btn.disabled = false; btn.style.opacity = ''; }
+  }
+}
+async function testConn(kind){
+  const box = $('connTest');
+  box.classList.remove('hidden');
+  box.style.color = 'var(--muted)';
+  box.textContent = 'جارٍ اختبار الاتصال...';
+  try{
+    let r;
+    if(kind === 'm3u'){
+      const url = $('inM3uUrl').value.trim();
+      if(!url){ box.textContent = 'أدخل رابط M3U أولاً'; box.style.color = '#fca5a5'; return; }
+      r = await call('TestConnection', 'm3u', url, '', '');
+    } else {
+      r = await call('TestConnection', 'xtream', $('inXServer').value.trim(), $('inXUser').value.trim(), $('inXPass').value);
+    }
+    if(r && r.ok && r.data){
+      box.textContent = r.data.report || '';
+      box.style.color = r.data.ok ? '#4ade80' : '#fca5a5';
+    } else {
+      box.textContent = (r && r.error) || 'فشل الاختبار';
+      box.style.color = '#fca5a5';
+    }
+  }catch(e){ box.textContent = 'خطأ: ' + e.message; box.style.color = '#fca5a5'; }
 }
 
 /* ================= enter app / data ================= */

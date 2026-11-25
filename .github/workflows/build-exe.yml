@@ -50,18 +50,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZaghlolPlayer-installer
-          path: installer/ZaghlolPlayer-Setup-2.0.exe
+          path: installer/ZaghlolPlayer-Setup-2.0.1.exe
           if-no-files-found: error
 
-      - name: Publish release v2.0.0
+      - name: Publish release v2.0.1
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.0
-          name: Zaghlol Player v2.0
+          tag_name: v2.0.1
+          name: Zaghlol Player v2.0.1
           body: |
-            Zaghlol Player v2.0 for Windows — modern IPTV player with a new dark TV-style interface (M3U / Xtream Codes / MAC login, Live TV, Movies, Series, 7-day EPG, multi-screen, PIN lock, 6 themes, demo channels).
+            Zaghlol Player v2.0.1 for Windows — fixes real-subscription login:
+            - M3U links: real error messages (HTTP status / timeout / server closed the connection) instead of a generic failure, browser-like User-Agent, gzip support, 60s download timeout, playlist-shape check.
+            - Xtream Codes: login can no longer get stuck on "loading" — 25s global timeout, catalogue loads in parallel, detailed auth errors (wrong credentials / expired / server unreachable), live seconds counter, button always re-enabled.
+            - New "Test connection" button on the login screen reports exactly what the server answered.
             The player contains no channels — use your own legal IPTV playlist/subscription.
           files: |
-            installer/ZaghlolPlayer-Setup-2.0.exe
+            installer/ZaghlolPlayer-Setup-2.0.1.exe
             publish/ZaghlolPlayer.exe
           fail_on_unmatched_files: true
