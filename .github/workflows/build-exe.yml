@@ -63,6 +63,9 @@ jobs:
             - M3U links: real error messages (HTTP status / timeout / server closed the connection) instead of a generic failure, browser-like User-Agent, gzip support, 60s download timeout, playlist-shape check.
             - Xtream Codes: login can no longer get stuck on "loading" — 25s global timeout, catalogue loads in parallel, detailed auth errors (wrong credentials / expired / server unreachable), live seconds counter, button always re-enabled.
             - New "Test connection" button on the login screen reports exactly what the server answered.
+            - M3U channels now always appear: group-title matching is canonical (case/space-insensitive), #EXTGRP and CR-only playlists supported, sidebar counts are computed from the loaded channel list, orphan channels get an "أخرى" bucket, and login shows the real channel/category counts (plus a clear message if a playlist arrives empty).
+            - Progress bar: fills left-to-right in the Arabic RTL interface; position/duration is clamped and never shows a bogus "35:47 / 9:20" for live-style streams.
+            - Categories keep the playlist's own order (الكل first), instead of alphabetical sorting.
             The player contains no channels — use your own legal IPTV playlist/subscription.
           files: |
             installer/ZaghlolPlayer-Setup-2.0.1.exe

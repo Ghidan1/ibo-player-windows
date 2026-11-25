@@ -147,12 +147,25 @@ namespace ZaghlolPlayer
         public static PlaylistData ParseM3u(string text, LoginProfile login)
         {
             var data = new PlaylistData { Login = login };
+            // Canonical group key: trimmed + case-insensitive. The FIRST-seen spelling
+            // is the canonical category id, and every channel is resolved through this
+            // map — so a channel's CategoryId can never disagree with its category's Id
+            // (different casing / stray spaces in group-title used to hide channels).
             var catMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string CanonicalGroup(string g)
+            {
+                g = (g ?? "").Trim();
+                if (g.Length == 0) g = "All Channels";
+                if (!catMap.TryGetValue(g, out var canon)) { canon = g; catMap[g] = canon; }
+                return canon;
+            }
             string pendingAttrs = "";
             string pendingName = "";
+            string pendingExtGrp = "";
             bool pending = false;
 
-            foreach (var rawLine in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+            // Split on \r\n, \n AND lone \r (some panels emit old-Mac line endings).
+            foreach (var rawLine in text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None))
             {
                 var line = rawLine.Trim();
                 if (line.Length == 0) continue;
@@ -161,20 +174,27 @@ namespace ZaghlolPlayer
                     int comma = line.LastIndexOf(',');
                     pendingAttrs = comma > 0 ? line.Substring(0, comma) : line;
                     pendingName = comma > 0 && comma + 1 < line.Length ? line.Substring(comma + 1).Trim() : "";
+                    pendingExtGrp = "";
                     pending = true;
                     continue;
                 }
-                if (line.StartsWith("#")) continue; // #EXTM3U, #EXTGRP, etc.
+                // #EXTGRP:Category — some panels put the group here instead of group-title.
+                if (line.StartsWith("#EXTGRP:", StringComparison.OrdinalIgnoreCase))
+                {
+                    pendingExtGrp = line.Substring("#EXTGRP:".Length).Trim();
+                    continue;
+                }
+                if (line.StartsWith("#")) continue; // #EXTM3U, #EXTVLCOPT, etc.
                 if (pending && (line.StartsWith("http", StringComparison.OrdinalIgnoreCase) || line.Contains("://")))
                 {
                     var attrs = ParseAttrs(pendingAttrs);
                     string name = pendingName;
                     if (name.Length == 0 && attrs.TryGetValue("tvg-name", out var tn)) name = tn;
                     if (name.Length == 0) name = line;
-                    string group = attrs.TryGetValue("group-title", out var g) && g.Length > 0 ? g : "All Channels";
+                    string rawGroup = attrs.TryGetValue("group-title", out var g) && g.Length > 0 ? g : pendingExtGrp;
+                    string group = CanonicalGroup(rawGroup);
                     string logo = attrs.TryGetValue("tvg-logo", out var l) ? l : "";
                     string tvgId = attrs.TryGetValue("tvg-id", out var tid) ? tid : name;
-                    if (!catMap.ContainsKey(group)) catMap[group] = group;
                     data.Channels.Add(new Channel
                     {
                         Id = tvgId,
@@ -190,9 +210,11 @@ namespace ZaghlolPlayer
                 }
             }
 
+            // Categories in the playlist's OWN order (first appearance), NOT alphabetical.
+            // "الكل" (All) is prepended by the UI; this list must keep a stable order
+            // every time the playlist loads.
             foreach (var kv in catMap)
-                data.LiveCategories.Add(new Category { Id = kv.Key, Name = kv.Key });
-            data.LiveCategories.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+                data.LiveCategories.Add(new Category { Id = kv.Value, Name = kv.Value });
             return data;
         }
 

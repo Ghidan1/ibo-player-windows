@@ -104,7 +104,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
 #nowBar{ background:var(--panel); border-top:1px solid var(--border); padding:10px 16px; flex-shrink:0; }
 .nowRow{ display:flex; justify-content:space-between; gap:14px; font-size:12.5px; color:var(--muted); margin-bottom:7px; }
 .nowRow b{ color:var(--text); }
-.prog{ height:6px; border-radius:4px; background:#232744; overflow:hidden; cursor:pointer; }
+.prog{ height:6px; border-radius:4px; background:#232744; overflow:hidden; cursor:pointer; direction:ltr; }
 .prog > div{ height:100%; background:linear-gradient(90deg,var(--acc),var(--acc2)); width:0%; transition:width .5s; }
 .transport{ display:flex; align-items:center; gap:6px; margin-top:9px; }
 .tbtn{ min-width:34px; height:34px; padding:0 10px; border-radius:8px; background:var(--panel2); border:1px solid var(--border); font-size:14px; display:flex; align-items:center; justify-content:center; }
@@ -113,7 +113,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
 .volWrap{ display:flex; align-items:center; gap:6px; margin-inline-start:8px; }
 .volWrap input[type=range]{ width:90px; accent-color:var(--acc); }
 .transport .spacer{ flex:1; }
-.timeLbl{ font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.timeLbl{ font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:plaintext; }
 
 /* ---------- content views ---------- */
 .view{ flex:1; min-height:0; overflow-y:auto; padding:18px 22px; }
@@ -677,12 +677,21 @@ async function enterApp(){
   const r = await call('GetData');
   if(!r.ok){ toast('تعذر تحميل البيانات: ' + (r.error || '')); return; }
   DATA = r.data;
+  const nCh = (DATA.channels || []).length;
+  const nCat = (DATA.liveCategories || []).length;
   $('loginScreen').classList.add('hidden');
   $('app').classList.remove('hidden');
   currentCat = 'all'; movieCat = 'all'; seriesCat = 'all'; searchQ = '';
   $('searchInput').value = '';
   renderCats(); renderChannels(); renderMovies(); renderSeries(); buildGuideChannels(); renderFavs();
   const v = $('video'); v.volume = (S.settings.volume ?? 80) / 100;
+  if(nCh === 0){
+    // Never show a silently empty screen: say plainly what happened.
+    toast('تم الدخول لكن القائمة وصلت بدون قنوات — جرّب "اختبار الاتصال" أو رابط M3U آخر');
+    $('channelList').innerHTML = '<div class="empty"><div class="big">📺</div>القائمة وصلت بدون قنوات<br>تأكد من الرابط وبيانات الاشتراك ثم حاول مرة أخرى</div>';
+    return;
+  }
+  toast('تم تحميل ' + nCh + ' قناة في ' + nCat + ' تصنيف');
   // auto-play the first channel (live TV behaviour)
   const first = filteredChannels()[0];
   if(first) playChannel(first);
@@ -690,24 +699,39 @@ async function enterApp(){
 function isLockedCategory(catName){
   return (S.lockedCategories || []).includes(catName) && !unlockedCats.has(catName);
 }
+function catKey(s){ return String(s || '').trim().toLowerCase(); }
+function orphanChannels(){
+  const known = new Set((DATA.liveCategories || []).map(c => catKey(c.id)));
+  return (DATA.channels || []).filter(c => !known.has(catKey(c.categoryId)));
+}
 function visibleChannels(){
   let list = (DATA.channels || []);
-  if(currentCat !== 'all') list = list.filter(c => c.categoryId === currentCat);
+  if(currentCat === 'other') list = orphanChannels();
+  else if(currentCat !== 'all') list = list.filter(c => catKey(c.categoryId) === catKey(currentCat));
   if(searchQ) list = list.filter(c => (c.name || '').toLowerCase().includes(searchQ));
   return list;
 }
 function filteredChannels(){ return visibleChannels(); }
 function renderCats(){
   const cats = DATA.liveCategories || [];
-  const total = (DATA.channels || []).length;
+  const chans = DATA.channels || [];
+  // Counts are computed HERE from the actual channel list (single source of truth),
+  // with canonical matching — the sidebar can never disagree with the channel list.
+  const counts = {};
+  chans.forEach(c => { const k = catKey(c.categoryId); counts[k] = (counts[k] || 0) + 1; });
+  const total = chans.length;
+  const orphans = orphanChannels().length;
   let html = '<div class="catItem' + (currentCat === 'all' ? ' active' : '') + '" onclick="selectCat(\'all\')"><span>📺 الكل</span><span class="n">' + total + '</span></div>';
-  html += cats.map(c => '<div class="catItem' + (currentCat === c.id ? ' active' : '') + '" onclick="selectCat(\'' + encodeURIComponent(c.id) + '\')"><span>' + (isLockedCategory(c.name) ? '🔒 ' : '') + esc(c.name) + '</span><span class="n">' + (c.count || 0) + '</span></div>').join('');
+  html += cats.map(c => '<div class="catItem' + (currentCat === c.id ? ' active' : '') + '" onclick="selectCat(\'' + encodeURIComponent(c.id) + '\')"><span>' + (isLockedCategory(c.name) ? '🔒 ' : '') + esc(c.name) + '</span><span class="n">' + (counts[catKey(c.id)] || 0) + '</span></div>').join('');
+  if(orphans > 0) html += '<div class="catItem' + (currentCat === 'other' ? ' active' : '') + '" onclick="selectCat(\'other\')"><span>📦 أخرى</span><span class="n">' + orphans + '</span></div>';
   $('catList').innerHTML = html;
 }
 function selectCat(id){
   id = decodeURIComponent(id);
-  const cat = (DATA.liveCategories || []).find(c => c.id === id);
-  if(cat && isLockedCategory(cat.name)){ requestPin(() => { unlockedCats.add(cat.name); renderCats(); selectCat(id); }); return; }
+  if(id !== 'all' && id !== 'other'){
+    const cat = (DATA.liveCategories || []).find(c => c.id === id);
+    if(cat && isLockedCategory(cat.name)){ requestPin(() => { unlockedCats.add(cat.name); renderCats(); selectCat(id); }); return; }
+  }
   currentCat = id; renderCats(); renderChannels();
 }
 function renderChannels(){
@@ -947,14 +971,20 @@ function setTrack(which, idx){
   v.addEventListener('error', () => { if(v.src) showVidError('تعذّر تشغيل هذا البث.'); });
   v.addEventListener('timeupdate', () => {
     if(currentKind === 'live') return;
-    if(isFinite(v.duration) && v.duration > 0){
-      $('progFill').style.width = (v.currentTime / v.duration * 100) + '%';
-      $('timeLbl').textContent = fmtDur(v.currentTime) + ' / ' + fmtDur(v.duration);
-      const now = Date.now();
-      if(now - resumeTimer > 10000 && currentVod){
-        resumeTimer = now;
-        try{ call('SaveResume', currentKind + ':' + currentVod.id, v.currentTime / v.duration); }catch(e){}
-      }
+    if(!isFinite(v.duration) || v.duration <= 0){
+      // Live-style HLS (no ENDLIST) or unknown length: never show a bogus ratio.
+      $('timeLbl').textContent = 'مباشر';
+      $('progFill').style.width = '0%';
+      return;
+    }
+    // Clamp: some streams report currentTime past duration — never show "35:47 / 9:20".
+    const pos = Math.min(v.currentTime, v.duration);
+    $('progFill').style.width = (pos / v.duration * 100) + '%';
+    $('timeLbl').textContent = fmtDur(pos) + ' / ' + fmtDur(v.duration);
+    const now = Date.now();
+    if(now - resumeTimer > 10000 && currentVod){
+      resumeTimer = now;
+      try{ call('SaveResume', currentKind + ':' + currentVod.id, pos / v.duration); }catch(e){}
     }
   });
   v.addEventListener('pause', () => {
