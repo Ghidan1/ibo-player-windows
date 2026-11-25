@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -52,3 +52,16 @@ jobs:
           name: IBOPlayer-installer
           path: installer/IBOPlayer-Setup-1.0.exe
           if-no-files-found: error
+
+      - name: Publish release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: IBO Player v1.0
+          body: |
+            IBO Player v1.0 for Windows — IPTV player (M3U / Xtream Codes / MAC login, Live TV, Movies, Series, 7-day EPG, multi-screen, PIN lock, 6 themes, demo channels).
+            The player contains no channels — use your own legal IPTV playlist/subscription.
+          files: |
+            installer/IBOPlayer-Setup-1.0.exe
+            publish/IBOPlayer.exe
+          fail_on_unmatched_files: true
