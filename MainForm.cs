@@ -80,6 +80,43 @@ namespace ZaghlolPlayer
             }
         }
 
+        // ---- true fullscreen (hides the Windows taskbar) ----
+        // Element fullscreen inside WebView2 alone only fills the window — the
+        // taskbar stays visible. So the FORM itself goes borderless over the
+        // full bounds of the screen it is on, and restores exactly on exit.
+        private bool _isFullscreen;
+        private FormBorderStyle _savedBorder;
+        private Rectangle _savedBounds;
+        private FormWindowState _savedState;
+        private bool _savedTopMost;
+
+        public void SetFullscreen(bool on)
+        {
+            if (InvokeRequired) { Invoke(new Action(() => SetFullscreen(on))); return; }
+            if (on == _isFullscreen) return;
+            if (on)
+            {
+                _savedBorder = FormBorderStyle;
+                _savedBounds = Bounds;
+                _savedState = WindowState;
+                _savedTopMost = TopMost;
+                var screen = Screen.FromControl(this);
+                _isFullscreen = true;
+                TopMost = true;
+                FormBorderStyle = FormBorderStyle.None;
+                WindowState = FormWindowState.Normal;
+                Bounds = screen.Bounds;
+            }
+            else
+            {
+                _isFullscreen = false;
+                TopMost = _savedTopMost;
+                FormBorderStyle = _savedBorder;
+                Bounds = _savedBounds;
+                WindowState = _savedState;
+            }
+        }
+
         /// <summary>Shows an Open File dialog on the UI thread and returns the chosen path ("" if cancelled).</summary>
         public string ShowOpenFileDialog(string filter, string title)
         {

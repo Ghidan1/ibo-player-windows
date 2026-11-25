@@ -48,7 +48,7 @@ namespace ZaghlolPlayer
         {
             return Task.FromResult(J(new
             {
-                version = "2.0.1",
+                version = "2.0.2",
                 settings = Store.Settings,
                 logins = Store.Data.Logins,
                 favorites = Store.Data.Favorites,
@@ -73,6 +73,12 @@ namespace ZaghlolPlayer
             }
             Store.SaveSettings();
             return Task.FromResult(Ok());
+        }
+
+        public Task<string> SetFullscreen(bool on)
+        {
+            try { _form.SetFullscreen(on); return Task.FromResult(Ok()); }
+            catch (Exception ex) { return Task.FromResult(Err(ex.Message)); }
         }
 
         public Task<string> ChangePin(string oldPin, string newPin)

@@ -126,8 +126,18 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
 .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
 .card{ background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden; cursor:pointer; transition:.15s; }
 .card:hover{ transform:translateY(-2px); border-color:var(--acc); box-shadow:0 8px 22px rgba(0,0,0,.4); }
-.card .poster{ aspect-ratio:2/3; background:linear-gradient(160deg,#1e2347,#12152a); display:flex; align-items:center; justify-content:center; font-size:38px; font-weight:800; color:#5b63a8; position:relative; overflow:hidden; }
-.card .poster img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.card .poster{ aspect-ratio:2/3; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden; background:linear-gradient(160deg,#232a5e,#12152a); }
+/* Poster tile — never a blank dark box: a designed gradient tile (colour from
+   the title) with a big monogram + the full title on a scrim, even when the
+   item has no cover art at all. A real cover fades in on top when it loads. */
+.poster .mono{ font-size:52px; font-weight:800; color:rgba(255,255,255,.92); text-shadow:0 3px 16px rgba(0,0,0,.5); z-index:1; line-height:1; }
+.poster .ptitle{ position:absolute; left:0; right:0; bottom:0; padding:28px 10px 9px; font-size:12px; font-weight:700; line-height:1.35; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.6); background:linear-gradient(180deg,transparent,rgba(0,0,0,.82)); z-index:2; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.poster img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .35s ease; z-index:3; }
+.poster img.ld{ opacity:1; }
+.poster::after{ content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(105deg,transparent 42%,rgba(255,255,255,.08) 50%,transparent 58%); background-size:250% 100%; animation:shim 1.8s linear infinite; }
+.poster.hasImg::after{ display:none; }
+.poster.hasImg .mono, .poster.hasImg .ptitle{ display:none; }
+@keyframes shim{ from{ background-position:200% 0; } to{ background-position:-100% 0; } }
 .card .info{ padding:10px 11px; }
 .card .t{ font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .card .s{ font-size:11.5px; color:var(--muted); margin-top:3px; }
@@ -192,7 +202,9 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
 .swatch{ width:38px; height:38px; border-radius:50%; border:3px solid transparent; cursor:pointer; }
 .swatch.active{ border-color:#fff; transform:scale(1.08); }
 .detailTop{ display:flex; gap:16px; }
-.detailTop .poster{ width:150px; aspect-ratio:2/3; border-radius:12px; object-fit:cover; background:linear-gradient(160deg,#1e2347,#12152a); flex-shrink:0; }
+.detailTop .poster{ width:150px; aspect-ratio:2/3; border-radius:12px; object-fit:cover; background:linear-gradient(160deg,#1e2347,#12152a); flex-shrink:0; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden; }
+.detailTop .poster .mono{ font-size:44px; }
+.detailTop .poster .ptitle{ font-size:11px; }
 .detailTop .meta{ min-width:0; }
 .detailTop h2{ font-size:20px; }
 .epRow{ display:flex; gap:10px; align-items:center; background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:10px 13px; margin-bottom:7px; cursor:pointer; }
@@ -391,7 +403,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
 <div id="movieModal" class="modalBg hidden" onclick="if(event.target===this)closeModal('movieModal')">
   <div class="modal">
     <div class="detailTop">
-      <img class="poster" id="mvPoster" alt="">
+      <div class="poster" id="mvPoster"></div>
       <div class="meta">
         <h2 id="mvTitle"></h2>
         <div class="sub" id="mvMeta"></div>
@@ -408,7 +420,7 @@ main{ flex:1; min-height:0; display:flex; flex-direction:column; }
 <div id="seriesModal" class="modalBg hidden" onclick="if(event.target===this)closeModal('seriesModal')">
   <div class="modal wide">
     <div class="detailTop">
-      <img class="poster" id="srPoster" alt="">
+      <div class="poster" id="srPoster"></div>
       <div class="meta">
         <h2 id="srTitle"></h2>
         <div class="sub" id="srMeta"></div>
@@ -522,6 +534,31 @@ function logoHtml(ch, size){
   const style = 'background:hsl(' + hueOf(ch.name) + ' 65% 42%)';
   const img = ch.logo ? '<img src="' + esc(ch.logo) + '" onerror="this.remove()" alt="">' : '';
   return '<div class="chLogo" style="' + style + '">' + letter + img + '</div>';
+}
+/* Poster tile content: monogram + title on a coloured gradient; a real cover
+   fades in on top when it loads (onerror just drops the img and the designed
+   tile stays — a card is NEVER a blank dark box). */
+function monogram(name){
+  const words = String(name || '?').trim().split(/\s+/).filter(Boolean);
+  if(words.length >= 2) return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
+  return String(name || '?').trim().slice(0, 2).toUpperCase();
+}
+function posterInner(it){
+  const nm = (it.name || '?').trim();
+  const img = it.cover ? '<img src="' + esc(it.cover) + '" referrerpolicy="no-referrer" loading="lazy" alt="" onload="this.parentNode.classList.add(\'hasImg\');this.classList.add(\'ld\')" onerror="this.remove()">' : '';
+  return '<span class="mono">' + esc(monogram(nm)) + '</span><span class="ptitle">' + esc(nm) + '</span>' + img;
+}
+function posterHtml(it){
+  const nm = (it.name || '?').trim();
+  const hue = hueOf(nm);
+  return '<div class="poster" style="background:linear-gradient(155deg,hsl(' + hue + ' 62% 40%),hsl(' + ((hue + 45) % 360) + ' 58% 20%))">' + posterInner(it) + '</div>';
+}
+function setModalPoster(el, it){
+  const nm = (it.name || '?').trim();
+  const hue = hueOf(nm);
+  el.classList.remove('hasImg');
+  el.style.background = 'linear-gradient(155deg,hsl(' + hue + ' 62% 40%),hsl(' + ((hue + 45) % 360) + ' 58% 20%))';
+  el.innerHTML = posterInner(it);
 }
 function fmtTime(iso){
   if(!iso) return '';
@@ -910,10 +947,34 @@ function cycleAspect(){
   $('video2').style.objectFit = ASPECTS[aspectIdx];
   toast('أبعاد الصورة: ' + ASPECTS[aspectIdx]);
 }
-function toggleFullscreen(){
-  if(document.fullscreenElement){ document.exitFullscreen(); }
-  else { $('videoWrap').requestFullscreen().catch(()=>{}); }
+/* True fullscreen: element fullscreen inside WebView2 alone never hides the
+   Windows taskbar — the WinForms window itself must go borderless over the
+   full screen bounds (via the native SetFullscreen bridge call). */
+let appFs = false;
+async function enterAppFullscreen(){
+  try{ await call('SetFullscreen', true); }
+  catch(e){ toast('تعذّر ملء الشاشة'); return; }
+  appFs = true;
+  try{ await $('videoWrap').requestFullscreen(); }catch(e){}
 }
+async function exitAppFullscreen(){
+  try{ if(document.fullscreenElement) await document.exitFullscreen(); }catch(e){}
+  try{ await call('SetFullscreen', false); }catch(e){}
+  appFs = false;
+}
+async function toggleFullscreen(){
+  if(appFs || document.fullscreenElement){ await exitAppFullscreen(); }
+  else { await enterAppFullscreen(); }
+}
+document.addEventListener('fullscreenchange', () => {
+  // Esc inside element-fullscreen: the browser leaves element fullscreen —
+  // restore the window too so the taskbar comes back.
+  if(!document.fullscreenElement && appFs){ call('SetFullscreen', false).catch(()=>{}); appFs = false; }
+});
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' && appFs && !document.fullscreenElement){ exitAppFullscreen(); }
+});
+$('videoWrap').addEventListener('dblclick', () => toggleFullscreen());
 function toggleDual(force){
   dual = typeof force === 'boolean' ? force : !dual;
   $('videoWrap').classList.toggle('dual', dual);
@@ -1030,10 +1091,9 @@ function renderMovies(){
     const res = (DATA.resume || {})[key];
     const fav = (S.favorites || []).includes(key);
     return '<div class="card" onclick="openMovie(\'' + encodeURIComponent(m.id) + '\')">' +
-      '<div class="poster">' + esc((m.name || '?').trim().charAt(0)) +
-      (m.cover ? '<img src="' + esc(m.cover) + '" onerror="this.remove()" loading="lazy" alt="">' : '') + '</div>' +
+      posterHtml(m) +
       '<div class="info"><div class="t">' + esc(m.name) + (fav ? ' ★' : '') + '</div>' +
-      '<div class="s">' + esc(m.year || '') + (m.rating ? ' • ⭐ ' + esc(m.rating) : '') + '</div>' +
+      '<div class="s">' + [m.year || '', m.rating ? '⭐ ' + m.rating : '', m.categoryName || ''].filter(Boolean).join(' • ') + '</div>' +
       (res ? '<div class="resumeBar"><div style="width:' + Math.round(res*100) + '%"></div></div>' : '') +
       '</div></div>';
   }).join('') || '<div class="empty"><div class="big">🎬</div>لا توجد أفلام</div>';
@@ -1043,7 +1103,7 @@ function openMovie(id){
   id = decodeURIComponent(id);
   const m = (DATA.movies || []).find(x => String(x.id) === String(id)); if(!m) return;
   currentMovie = m;
-  $('mvPoster').src = m.cover || '';
+  setModalPoster($('mvPoster'), m);
   $('mvTitle').textContent = m.name;
   $('mvMeta').textContent = [m.year, m.rating ? '⭐ ' + m.rating : '', m.categoryName].filter(Boolean).join(' • ');
   $('mvPlot').textContent = m.plot || '';
@@ -1065,10 +1125,9 @@ function renderSeries(){
   $('seriesGrid').innerHTML = list.slice(0, 400).map(s => {
     const fav = (S.favorites || []).includes('series:' + s.id);
     return '<div class="card" onclick="openSeries(\'' + encodeURIComponent(s.id) + '\')">' +
-      '<div class="poster">' + esc((s.name || '?').trim().charAt(0)) +
-      (s.cover ? '<img src="' + esc(s.cover) + '" onerror="this.remove()" loading="lazy" alt="">' : '') + '</div>' +
+      posterHtml(s) +
       '<div class="info"><div class="t">' + esc(s.name) + (fav ? ' ★' : '') + '</div>' +
-      '<div class="s">' + esc(s.year || '') + (s.rating ? ' • ⭐ ' + esc(s.rating) : '') + '</div></div></div>';
+      '<div class="s">' + [s.year || '', s.rating ? '⭐ ' + s.rating : '', s.categoryName || ''].filter(Boolean).join(' • ') + '</div></div></div>';
   }).join('') || '<div class="empty"><div class="big">🎞️</div>لا توجد مسلسلات</div>';
 }
 let currentSerie = null;
@@ -1076,7 +1135,7 @@ async function openSeries(id){
   id = decodeURIComponent(id);
   const s = (DATA.series || []).find(x => String(x.id) === String(id)); if(!s) return;
   currentSerie = s;
-  $('srPoster').src = s.cover || '';
+  setModalPoster($('srPoster'), s);
   $('srTitle').textContent = s.name;
   $('srMeta').textContent = [s.year, s.rating ? '⭐ ' + s.rating : '', s.categoryName].filter(Boolean).join(' • ');
   $('srPlot').textContent = s.plot || '';
@@ -1184,9 +1243,9 @@ function renderFavs(){
   const favCh = (DATA.channels || []).filter(c => (S.favorites || []).includes('live:' + c.id));
   $('favChannels').innerHTML = favCh.map(c => '<div class="chItem" onclick="switchTab(\'live\');playChannel(findChannel(decodeURIComponent(\'' + encodeURIComponent(c.id) + '\')))">' + logoHtml(c) + '<div class="chMeta"><div class="chName">' + esc(c.name) + '</div><div class="chSub">' + esc(c.categoryName || '') + '</div></div><span class="favStar">★</span></div>').join('') || '<div class="empty">لا توجد قنوات مفضلة بعد</div>';
   const favMv = (DATA.movies || []).filter(m => (S.favorites || []).includes('vod:' + m.id));
-  $('favMovies').innerHTML = favMv.map(m => '<div class="card" onclick="openMovie(\'' + encodeURIComponent(m.id) + '\')"><div class="poster">' + esc((m.name||'?').charAt(0)) + (m.cover ? '<img src="' + esc(m.cover) + '" onerror="this.remove()" loading="lazy">' : '') + '</div><div class="info"><div class="t">' + esc(m.name) + '</div></div></div>').join('') || '<div class="empty">لا توجد أفلام مفضلة</div>';
+  $('favMovies').innerHTML = favMv.map(m => '<div class="card" onclick="openMovie(\'' + encodeURIComponent(m.id) + '\')">' + posterHtml(m) + '<div class="info"><div class="t">' + esc(m.name) + '</div></div></div>').join('') || '<div class="empty">لا توجد أفلام مفضلة</div>';
   const favSr = (DATA.series || []).filter(s => (S.favorites || []).includes('series:' + s.id));
-  $('favSeries').innerHTML = favSr.map(s => '<div class="card" onclick="openSeries(\'' + encodeURIComponent(s.id) + '\')"><div class="poster">' + esc((s.name||'?').charAt(0)) + (s.cover ? '<img src="' + esc(s.cover) + '" onerror="this.remove()" loading="lazy">' : '') + '</div><div class="info"><div class="t">' + esc(s.name) + '</div></div></div>').join('') || '<div class="empty">لا توجد مسلسلات مفضلة</div>';
+  $('favSeries').innerHTML = favSr.map(s => '<div class="card" onclick="openSeries(\'' + encodeURIComponent(s.id) + '\')">' + posterHtml(s) + '<div class="info"><div class="t">' + esc(s.name) + '</div></div></div>').join('') || '<div class="empty">لا توجد مسلسلات مفضلة</div>';
   $('recentList').innerHTML = (S.recents || []).slice(0, 10).map(r => '<div class="chItem" style="cursor:default"><div class="chMeta"><div class="chName">' + esc(r.name) + '</div><div class="chSub">' + esc(r.kind) + ' • ' + esc(new Date(r.when).toLocaleString()) + '</div></div></div>').join('') || '<div class="empty">لا يوجد سجل مشاهدة بعد</div>';
 }
 

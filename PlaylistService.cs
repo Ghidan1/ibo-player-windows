@@ -151,12 +151,15 @@ namespace ZaghlolPlayer
             // is the canonical category id, and every channel is resolved through this
             // map — so a channel's CategoryId can never disagree with its category's Id
             // (different casing / stray spaces in group-title used to hide channels).
-            var catMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string CanonicalGroup(string g)
+            var liveCatMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var vodCatMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var serCatMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var seriesMap = new Dictionary<string, SerieItem>(StringComparer.OrdinalIgnoreCase);
+            string CanonicalGroup(Dictionary<string, string> map, string g)
             {
                 g = (g ?? "").Trim();
                 if (g.Length == 0) g = "All Channels";
-                if (!catMap.TryGetValue(g, out var canon)) { canon = g; catMap[g] = canon; }
+                if (!map.TryGetValue(g, out var canon)) { canon = g; map[g] = canon; }
                 return canon;
             }
             string pendingAttrs = "";
@@ -192,20 +195,98 @@ namespace ZaghlolPlayer
                     if (name.Length == 0 && attrs.TryGetValue("tvg-name", out var tn)) name = tn;
                     if (name.Length == 0) name = line;
                     string rawGroup = attrs.TryGetValue("group-title", out var g) && g.Length > 0 ? g : pendingExtGrp;
-                    string group = CanonicalGroup(rawGroup);
                     string logo = attrs.TryGetValue("tvg-logo", out var l) ? l : "";
                     string tvgId = attrs.TryGetValue("tvg-id", out var tid) ? tid : name;
-                    data.Channels.Add(new Channel
+                    // ---- classify the entry: live channel | VOD movie | series episode ----
+                    // m3u_plus playlists from panels mix all three in one file, so the
+                    // URL extension + name markers decide — otherwise Movies/Series
+                    // tabs stay empty for M3U logins.
+                    string urlPath = line.Split('?')[0];
+                    string ext = "";
+                    var dot = urlPath.LastIndexOf('.');
+                    if (dot >= 0 && dot > urlPath.LastIndexOf('/')) ext = urlPath.Substring(dot + 1).ToLowerInvariant();
+                    bool isVodExt = ext is "mp4" or "mkv" or "avi" or "mov" or "m4v" or "webm" or "flv";
+                    string year = "";
+                    var ym = Regex.Match(name, @"\((19|20)\d\d\)");
+                    if (ym.Success) { year = ym.Value.Trim('(', ')'); name = name.Remove(ym.Index, ym.Length).Trim(); }
+                    // Series markers: S01E02 / Season 1 Episode 2 / الموسم 1 الحلقة 2
+                    int season = 0, epNum = 0;
+                    string seriesName = "";
+                    var se = Regex.Match(name, @"[Ss](\d{1,2})\s*[Ee](\d{1,3})");
+                    if (se.Success)
                     {
-                        Id = tvgId,
-                        Name = name,
-                        CategoryId = group,
-                        CategoryName = group,
-                        Logo = logo,
-                        Url = line,
-                        EpgId = tvgId,
-                        StreamId = tvgId
-                    });
+                        season = int.Parse(se.Groups[1].Value); epNum = int.Parse(se.Groups[2].Value);
+                        seriesName = name.Remove(se.Index, se.Length).Trim().TrimEnd('-', ':', '|').Trim();
+                    }
+                    else
+                    {
+                        var sm = Regex.Match(name, @"[Ss]eason\s*(\d+)", RegexOptions.IgnoreCase);
+                        var em = Regex.Match(name, @"[Ee]pisode\s*(\d+)", RegexOptions.IgnoreCase);
+                        var am = Regex.Match(name, @"الموسم\s*(\d+)");
+                        var ae = Regex.Match(name, @"الحلقة\s*(\d+)");
+                        if (sm.Success) season = int.Parse(sm.Groups[1].Value);
+                        if (am.Success) season = int.Parse(am.Groups[1].Value);
+                        if (em.Success) epNum = int.Parse(em.Groups[1].Value);
+                        if (ae.Success) epNum = int.Parse(ae.Groups[1].Value);
+                        if (season > 0 || epNum > 0)
+                        {
+                            seriesName = name;
+                            foreach (var rx in new[] { @"[Ss]eason\s*\d+", @"[Ee]pisode\s*\d+", @"الموسم\s*\d+", @"الحلقة\s*\d+" })
+                                seriesName = Regex.Replace(seriesName, rx, "", RegexOptions.IgnoreCase).Trim();
+                            seriesName = seriesName.TrimEnd('-', ':', '|').Trim();
+                        }
+                    }
+                    bool groupSaysSeries = (rawGroup ?? "").IndexOf("مسلسل", StringComparison.OrdinalIgnoreCase) >= 0
+                        || (rawGroup ?? "").IndexOf("series", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (seriesName.Length == 0 && groupSaysSeries && isVodExt)
+                    {
+                        // VOD entry inside a series group but with no episode marker:
+                        // keep it as a series with a single season.
+                        seriesName = name; season = 1; epNum = 0;
+                    }
+                    if (seriesName.Length > 0)
+                    {
+                        string group = CanonicalGroup(serCatMap, rawGroup);
+                        string key = seriesName.ToLowerInvariant();
+                        if (!seriesMap.TryGetValue(key, out var serie))
+                        {
+                            serie = new SerieItem { Id = seriesName, Name = seriesName, CategoryId = group, CategoryName = group, Cover = logo, Year = year };
+                            seriesMap[key] = serie;
+                            data.Series.Add(serie);
+                        }
+                        if (logo.Length > 0 && string.IsNullOrEmpty(serie.Cover)) serie.Cover = logo;
+                        string sn = season > 0 ? season.ToString() : "1";
+                        if (!serie.Episodes.TryGetValue(sn, out var eps)) { eps = new List<EpisodeItem>(); serie.Episodes[sn] = eps; }
+                        eps.Add(new EpisodeItem
+                        {
+                            Id = tvgId, Title = name, EpisodeNum = epNum, Season = sn,
+                            Extension = ext.Length > 0 ? ext : "mp4", Url = line, Info = ""
+                        });
+                    }
+                    else if (isVodExt)
+                    {
+                        string group = CanonicalGroup(vodCatMap, rawGroup);
+                        data.Movies.Add(new VodItem
+                        {
+                            Id = tvgId, Name = name, CategoryId = group, CategoryName = group,
+                            Cover = logo, Year = year, Extension = ext, Url = line
+                        });
+                    }
+                    else
+                    {
+                        string group = CanonicalGroup(liveCatMap, rawGroup);
+                        data.Channels.Add(new Channel
+                        {
+                            Id = tvgId,
+                            Name = name,
+                            CategoryId = group,
+                            CategoryName = group,
+                            Logo = logo,
+                            Url = line,
+                            EpgId = tvgId,
+                            StreamId = tvgId
+                        });
+                    }
                     pending = false;
                 }
             }
@@ -213,8 +294,16 @@ namespace ZaghlolPlayer
             // Categories in the playlist's OWN order (first appearance), NOT alphabetical.
             // "الكل" (All) is prepended by the UI; this list must keep a stable order
             // every time the playlist loads.
-            foreach (var kv in catMap)
+            foreach (var kv in liveCatMap)
                 data.LiveCategories.Add(new Category { Id = kv.Value, Name = kv.Value });
+            foreach (var kv in vodCatMap)
+                data.VodCategories.Add(new Category { Id = kv.Value, Name = kv.Value });
+            foreach (var kv in serCatMap)
+                data.SeriesCategories.Add(new Category { Id = kv.Value, Name = kv.Value });
+            // Episodes arrive in playlist order — sort each season by episode number.
+            foreach (var s in data.Series)
+                foreach (var eps in s.Episodes.Values)
+                    eps.Sort((a, b) => a.EpisodeNum.CompareTo(b.EpisodeNum));
             return data;
         }
 

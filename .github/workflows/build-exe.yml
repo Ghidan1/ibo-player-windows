@@ -50,24 +50,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZaghlolPlayer-installer
-          path: installer/ZaghlolPlayer-Setup-2.0.1.exe
+          path: installer/ZaghlolPlayer-Setup-2.0.2.exe
           if-no-files-found: error
 
-      - name: Publish release v2.0.1
+      - name: Publish release v2.0.2
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.1
-          name: Zaghlol Player v2.0.1
+          tag_name: v2.0.2
+          name: Zaghlol Player v2.0.2
           body: |
-            Zaghlol Player v2.0.1 for Windows — fixes real-subscription login:
-            - M3U links: real error messages (HTTP status / timeout / server closed the connection) instead of a generic failure, browser-like User-Agent, gzip support, 60s download timeout, playlist-shape check.
-            - Xtream Codes: login can no longer get stuck on "loading" — 25s global timeout, catalogue loads in parallel, detailed auth errors (wrong credentials / expired / server unreachable), live seconds counter, button always re-enabled.
-            - New "Test connection" button on the login screen reports exactly what the server answered.
-            - M3U channels now always appear: group-title matching is canonical (case/space-insensitive), #EXTGRP and CR-only playlists supported, sidebar counts are computed from the loaded channel list, orphan channels get an "أخرى" bucket, and login shows the real channel/category counts (plus a clear message if a playlist arrives empty).
-            - Progress bar: fills left-to-right in the Arabic RTL interface; position/duration is clamped and never shows a bogus "35:47 / 9:20" for live-style streams.
-            - Categories keep the playlist's own order (الكل first), instead of alphabetical sorting.
+            Zaghlol Player v2.0.2 for Windows — movie/series posters + true fullscreen:
+            - Posters are never blank anymore: every movie/series card is now a designed gradient tile (colour from the title) with a big monogram and the full title on it; a real cover fades in on top when it loads, and a failed cover simply falls back to the tile. Loading shimmer while covers fetch, no-referrer image loading, and the detail screen uses the same tile instead of an empty image box.
+            - M3U playlists now fill the Movies and Series tabs too: VOD (.mp4/.mkv/...) entries become movies and S01E02 / Season / الحلقة entries become series with seasons and episodes (previously everything from M3U landed in Live TV only).
+            - True fullscreen: the window itself goes borderless over the full screen so the Windows taskbar is hidden; Esc, the fullscreen button, or double-click restores the window exactly.
             The player contains no channels — use your own legal IPTV playlist/subscription.
           files: |
-            installer/ZaghlolPlayer-Setup-2.0.1.exe
+            installer/ZaghlolPlayer-Setup-2.0.2.exe
             publish/ZaghlolPlayer.exe
           fail_on_unmatched_files: true
