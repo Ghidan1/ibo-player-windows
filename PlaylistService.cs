@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml;
 
-namespace IBOPlayer
+namespace ZaghlolPlayer
 {
     public static class PlaylistService
     {
@@ -19,7 +19,7 @@ namespace IBOPlayer
 
         static PlaylistService()
         {
-            Http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "IBOPlayer/1.0");
+            Http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "ZaghlolPlayer/2.0");
         }
 
         // ---------------- M3U ----------------

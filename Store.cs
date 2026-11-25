@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
-namespace IBOPlayer
+namespace ZaghlolPlayer
 {
     public class Settings
     {
@@ -31,7 +31,7 @@ namespace IBOPlayer
     public static class Store
     {
         public static readonly string AppDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "IBOPlayer");
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ZaghlolPlayer");
 
         private static readonly string SettingsPath = Path.Combine(AppDir, "settings.json");
         private static readonly string DataPath = Path.Combine(AppDir, "data.json");

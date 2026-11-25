@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace IBOPlayer
+namespace ZaghlolPlayer
 {
     public enum PlaylistKind { M3uUrl, M3uFile, Xtream, Mac, Demo }
 

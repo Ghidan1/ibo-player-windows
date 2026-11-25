@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ZaghlolPlayer</AssemblyName>
+    <RootNamespace>ZaghlolPlayer</RootNamespace>
+    <Version>2.0</Version>
+    <FileVersion>2.0.0.0</FileVersion>
+    <Company>Zaghlol Player</Company>
+    <Description>Zaghlol Player - modern IPTV player for Windows: M3U link/file, Xtream Codes, MAC portal, Live TV, Movies, Series, 7-day EPG, multi-screen, parental controls, themes.</Description>
+    <ApplicationIcon>z.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="ui.html" />
+    <EmbeddedResource Include="z.ico" />
+  </ItemGroup>
+
+</Project>

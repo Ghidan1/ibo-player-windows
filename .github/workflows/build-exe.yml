@@ -1,4 +1,4 @@
-name: Build IBO Player EXE
+name: Build Zaghlol Player EXE
 
 on:
   push:
@@ -21,13 +21,13 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore
-        run: dotnet restore IBOPlayer.csproj
+        run: dotnet restore ZaghlolPlayer.csproj
 
       - name: Build
-        run: dotnet build IBOPlayer.csproj -c Release --no-restore
+        run: dotnet build ZaghlolPlayer.csproj -c Release --no-restore
 
       - name: Publish single-file EXE
-        run: dotnet publish IBOPlayer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+        run: dotnet publish ZaghlolPlayer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 
       - name: Install Inno Setup
         run: choco install innosetup -y
@@ -37,31 +37,31 @@ jobs:
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = "iscc" }
-          & $iscc IBOPlayer.iss
+          & $iscc ZaghlolPlayer.iss
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: IBOPlayer-exe
-          path: publish/IBOPlayer.exe
+          name: ZaghlolPlayer-exe
+          path: publish/ZaghlolPlayer.exe
           if-no-files-found: error
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: IBOPlayer-installer
-          path: installer/IBOPlayer-Setup-1.0.exe
+          name: ZaghlolPlayer-installer
+          path: installer/ZaghlolPlayer-Setup-2.0.exe
           if-no-files-found: error
 
-      - name: Publish release v1.0.0
+      - name: Publish release v2.0.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: IBO Player v1.0
+          tag_name: v2.0.0
+          name: Zaghlol Player v2.0
           body: |
-            IBO Player v1.0 for Windows — IPTV player (M3U / Xtream Codes / MAC login, Live TV, Movies, Series, 7-day EPG, multi-screen, PIN lock, 6 themes, demo channels).
+            Zaghlol Player v2.0 for Windows — modern IPTV player with a new dark TV-style interface (M3U / Xtream Codes / MAC login, Live TV, Movies, Series, 7-day EPG, multi-screen, PIN lock, 6 themes, demo channels).
             The player contains no channels — use your own legal IPTV playlist/subscription.
           files: |
-            installer/IBOPlayer-Setup-1.0.exe
-            publish/IBOPlayer.exe
+            installer/ZaghlolPlayer-Setup-2.0.exe
+            publish/ZaghlolPlayer.exe
           fail_on_unmatched_files: true
