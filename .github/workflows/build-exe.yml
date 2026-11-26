@@ -50,21 +50,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZaghlolPlayer-installer
-          path: installer/ZaghlolPlayer-Setup-2.0.2.exe
+          path: installer/ZaghlolPlayer-Setup-2.0.3.exe
           if-no-files-found: error
 
-      - name: Publish release v2.0.2
+      - name: Publish release v2.0.3
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.2
-          name: Zaghlol Player v2.0.2
+          tag_name: v2.0.3
+          name: Zaghlol Player v2.0.3
           body: |
-            Zaghlol Player v2.0.2 for Windows — movie/series posters + true fullscreen:
-            - Posters are never blank anymore: every movie/series card is now a designed gradient tile (colour from the title) with a big monogram and the full title on it; a real cover fades in on top when it loads, and a failed cover simply falls back to the tile. Loading shimmer while covers fetch, no-referrer image loading, and the detail screen uses the same tile instead of an empty image box.
-            - M3U playlists now fill the Movies and Series tabs too: VOD (.mp4/.mkv/...) entries become movies and S01E02 / Season / الحلقة entries become series with seasons and episodes (previously everything from M3U landed in Live TV only).
-            - True fullscreen: the window itself goes borderless over the full screen so the Windows taskbar is hidden; Esc, the fullscreen button, or double-click restores the window exactly.
+            Zaghlol Player v2.0.3 for Windows — UI restyle to the approved mockup design:
+            - Live TV: new top bar (logo + underline tabs + search/bell/profile icons), one sidebar with categories (violet active pill) and channels with red LIVE badges, an info bar over the video showing the REAL now/next programme from the EPG, and a bottom now-playing bar with channel name and progress.
+            - Movies/Series: header with count badge and search, category chips, wide landscape poster tiles (gradient tile + title + year/genre badge, real covers fade in when available), and a bottom navigation bar with the Z logo.
+            - All data stays real and dynamic from your playlist — no hard-coded channels, scores or counts.
             The player contains no channels — use your own legal IPTV playlist/subscription.
           files: |
-            installer/ZaghlolPlayer-Setup-2.0.2.exe
+            installer/ZaghlolPlayer-Setup-2.0.3.exe
             publish/ZaghlolPlayer.exe
           fail_on_unmatched_files: true

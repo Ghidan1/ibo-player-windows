@@ -8,8 +8,8 @@
     <Nullable>enable</Nullable>
     <AssemblyName>ZaghlolPlayer</AssemblyName>
     <RootNamespace>ZaghlolPlayer</RootNamespace>
-    <Version>2.0.2</Version>
-    <FileVersion>2.0.2.0</FileVersion>
+    <Version>2.0.3</Version>
+    <FileVersion>2.0.3.0</FileVersion>
     <Company>Zaghlol Player</Company>
     <Description>Zaghlol Player - modern IPTV player for Windows: M3U link/file, Xtream Codes, MAC portal, Live TV, Movies, Series, 7-day EPG, multi-screen, parental controls, themes.</Description>
     <ApplicationIcon>z.ico</ApplicationIcon>

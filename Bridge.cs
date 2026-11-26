@@ -48,7 +48,7 @@ namespace ZaghlolPlayer
         {
             return Task.FromResult(J(new
             {
-                version = "2.0.2",
+                version = "2.0.3",
                 settings = Store.Settings,
                 logins = Store.Data.Logins,
                 favorites = Store.Data.Favorites,
